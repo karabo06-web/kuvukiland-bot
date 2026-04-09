@@ -1,11 +1,12 @@
 """
-Kuvukiland Job Bot - RSS Edition
-Uses Google News RSS feeds - reliable, no scraping breakage
-Posts entry-level jobs & learnerships to Kuvukiland Facebook Page
+Kuvukiland Job Bot - One Post Per Job
+Posts each opportunity as a separate Facebook post
+Scheduled to run multiple times per day via GitHub Actions
 """
 
 import os
 import re
+import json
 import time
 import requests
 import xml.etree.ElementTree as ET
@@ -27,111 +28,81 @@ HEADERS = {
 
 # ── RSS Sources ───────────────────────────────────────────────────────────────
 RSS_FEEDS = [
-    {
-        "url": "https://news.google.com/rss/search?q=learnership+south+africa+2025+OR+2026&hl=en-ZA&gl=ZA&ceid=ZA:en",
-        "source": "Google News"
-    },
-    {
-        "url": "https://news.google.com/rss/search?q=learnership+matric+south+africa&hl=en-ZA&gl=ZA&ceid=ZA:en",
-        "source": "Google News"
-    },
-    {
-        "url": "https://news.google.com/rss/search?q=entry+level+jobs+south+africa+no+experience&hl=en-ZA&gl=ZA&ceid=ZA:en",
-        "source": "Google News"
-    },
-    {
-        "url": "https://news.google.com/rss/search?q=government+vacancies+south+africa+grade+12&hl=en-ZA&gl=ZA&ceid=ZA:en",
-        "source": "Google News"
-    },
-    {
-        "url": "https://news.google.com/rss/search?q=SETA+learnership+2025+OR+2026+apply&hl=en-ZA&gl=ZA&ceid=ZA:en",
-        "source": "Google News"
-    },
-    {
-        "url": "https://news.google.com/rss/search?q=internship+south+africa+matric+2026&hl=en-ZA&gl=ZA&ceid=ZA:en",
-        "source": "Google News"
-    },
+    "https://news.google.com/rss/search?q=learnership+south+africa+2026&hl=en-ZA&gl=ZA&ceid=ZA:en",
+    "https://news.google.com/rss/search?q=learnership+matric+south+africa&hl=en-ZA&gl=ZA&ceid=ZA:en",
+    "https://news.google.com/rss/search?q=entry+level+jobs+south+africa+no+experience&hl=en-ZA&gl=ZA&ceid=ZA:en",
+    "https://news.google.com/rss/search?q=government+vacancies+south+africa+grade+12&hl=en-ZA&gl=ZA&ceid=ZA:en",
+    "https://news.google.com/rss/search?q=SETA+learnership+2026+apply&hl=en-ZA&gl=ZA&ceid=ZA:en",
+    "https://news.google.com/rss/search?q=internship+south+africa+matric+2026&hl=en-ZA&gl=ZA&ceid=ZA:en",
 ]
 
-# ── Filters ───────────────────────────────────────────────────────────────────
 GOOD_KEYWORDS = [
     "learnership", "internship", "entry level", "entry-level",
     "grade 12", "matric", "no experience", "no degree", "nqf",
     "trainee", "apprentice", "youth", "school leaver", "junior",
-    "clerk", "assistant", "general worker", "operator", "vacancies",
-    "apply now", "2025", "2026", "south africa", "gauteng",
+    "clerk", "assistant", "general worker", "vacancies", "2026",
 ]
 
 BAD_KEYWORDS = [
-    "honours required", "masters required", "phd", "postgraduate",
-    "10 years", "8 years", "7 years", "6 years", "5 years experience",
-    "executive", "head of department", "chief ", "director",
+    "honours required", "masters", "phd", "postgraduate",
+    "5 years experience", "executive", "head of", "director",
 ]
+
+EMOJIS = ["🌟", "🚀", "💼", "📢", "🎯", "✅", "🔥", "👊", "💪", "🙌",
+          "🎉", "📌", "👉", "💡", "🏆", "🌍", "📣", "🤝", "🎓", "💰"]
 
 def is_relevant(title, summary=""):
     text = (title + " " + summary).lower()
-    has_good = any(kw in text for kw in GOOD_KEYWORDS)
-    has_bad  = any(kw in text for kw in BAD_KEYWORDS)
-    return has_good and not has_bad
+    return any(kw in text for kw in GOOD_KEYWORDS) and not any(kw in text for kw in BAD_KEYWORDS)
 
-# ── RSS Parser ────────────────────────────────────────────────────────────────
-def fetch_rss(feed):
-    listings = []
-    try:
-        r = requests.get(feed["url"], headers=HEADERS, timeout=20)
-        root = ET.fromstring(r.content)
-        items = root.findall(".//item")
-        for item in items[:10]:
-            title_el = item.find("title")
-            link_el  = item.find("link")
-            desc_el  = item.find("description")
+def fetch_all_listings():
+    all_listings = []
+    for url in RSS_FEEDS:
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=20)
+            root = ET.fromstring(r.content)
+            for item in root.findall(".//item")[:8]:
+                title_el = item.find("title")
+                link_el  = item.find("link")
+                desc_el  = item.find("description")
+                title   = unescape(title_el.text.strip()) if title_el is not None and title_el.text else ""
+                link    = link_el.text.strip() if link_el is not None and link_el.text else ""
+                summary = unescape(desc_el.text.strip()) if desc_el is not None and desc_el.text else ""
+                summary = re.sub(r"<[^>]+>", "", summary)
+                title   = re.sub(r"\s*-\s*[^-]+$", "", title).strip()
+                if title and link and is_relevant(title, summary):
+                    all_listings.append({"title": title[:120], "link": link})
+            time.sleep(1)
+        except Exception as e:
+            print(f"  Feed error: {e}")
 
-            title   = unescape(title_el.text.strip()) if title_el is not None and title_el.text else ""
-            link    = link_el.text.strip() if link_el is not None and link_el.text else ""
-            summary = unescape(desc_el.text.strip()) if desc_el is not None and desc_el.text else ""
+    # Deduplicate
+    seen, unique = set(), []
+    for j in all_listings:
+        key = j["title"][:50].lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(j)
+    return unique
 
-            summary = re.sub(r"<[^>]+>", "", summary)
-            title = re.sub(r"\s*-\s*[^-]+$", "", title).strip()
-
-            if title and link and is_relevant(title, summary):
-                listings.append({
-                    "title": title[:120],
-                    "link": link,
-                    "source": feed["source"],
-                })
-    except Exception as e:
-        print(f"  RSS error: {e}")
-    return listings
-
-# ── Post Builder ──────────────────────────────────────────────────────────────
-EMOJIS = ["🌟", "🚀", "💼", "📢", "🎯", "✅", "🔥", "👊", "💪", "🙌"]
-
-def build_post(listings):
+def build_single_post(job, index):
+    emoji = EMOJIS[index % len(EMOJIS)]
     today = datetime.now().strftime("%d %B %Y")
-    header = (
-        f"📣 YOUTH OPPORTUNITIES — {today}\n"
+    return (
+        f"{emoji} OPPORTUNITY ALERT — {today}\n"
         f"{'='*38}\n"
-        f"✔ Grade 12 / Matric holders\n"
+        f"✔ Grade 12 / Matric\n"
         f"✔ No degree needed\n"
         f"✔ No experience required\n\n"
+        f"📋 {job['title']}\n\n"
+        f"🔗 Apply / Read more:\n{job['link']}\n\n"
+        f"{'─'*38}\n"
+        f"💡 Share this — help a young person!\n"
+        f"👉 Follow Kuvukiland for daily opportunities\n\n"
+        f"#Learnership #EntryLevel #Grade12Jobs #YouthEmployment "
+        f"#SouthAfrica #Matric #NoExperience #KuvukilandJobs"
     )
-    body = ""
-    for i, job in enumerate(listings[:8], 1):
-        emoji = EMOJIS[i % len(EMOJIS)]
-        body += f"{emoji} {job['title']}\n"
-        body += f"   🔗 {job['link']}\n\n"
 
-    footer = (
-        "─"*38 + "\n"
-        "💡 Share this post — help a young person!\n"
-        "👉 Follow Kuvukiland for daily opportunities\n\n"
-        "#Learnership #EntryLevel #Grade12Jobs #YouthEmployment "
-        "#SouthAfrica #Matric #NoExperience #KuvukilandJobs "
-        "#Internship #GovernmentJobs #SETA"
-    )
-    return header + body + footer
-
-# ── Facebook Poster ───────────────────────────────────────────────────────────
 def post_to_facebook(message):
     if not PAGE_TOKEN:
         print("❌ FB_PAGE_TOKEN not set.")
@@ -141,59 +112,31 @@ def post_to_facebook(message):
         r = requests.post(GRAPH_URL, data=payload, timeout=20)
         result = r.json()
         if "id" in result:
-            print(f"✅ Posted! Post ID: {result['id']}")
+            print(f"  ✅ Posted! ID: {result['id']}")
             return True
         else:
-            print(f"❌ Post failed: {result}")
+            print(f"  ❌ Failed: {result}")
             return False
     except Exception as e:
-        print(f"❌ Facebook API error: {e}")
+        print(f"  ❌ Error: {e}")
         return False
 
-# ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     print(f"\n🤖 Kuvukiland Job Bot — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print("Fetching opportunities via RSS...\n")
+    print("Fetching listings...\n")
 
-    all_listings = []
-    for feed in RSS_FEEDS:
-        results = fetch_rss(feed)
-        print(f"  Feed: {len(results)} found")
-        all_listings.extend(results)
-        time.sleep(1.5)
+    listings = fetch_all_listings()
+    print(f"Found {len(listings)} relevant listings\n")
 
-    seen, unique = set(), []
-    for j in all_listings:
-        key = j["title"][:50].lower()
-        if key not in seen:
-            seen.add(key)
-            unique.append(j)
-
-    print(f"\n✅ Unique relevant listings: {len(unique)}")
-
-    if not unique:
-        print("⚠️  No listings found. Posting fallback with direct links.")
-        message = (
-            f"📣 YOUTH OPPORTUNITIES — {datetime.now().strftime('%d %B %Y')}\n"
-            "======================================\n"
-            "✔ Grade 12 / Matric | No degree | No experience\n\n"
-            "🌟 Check these sites daily for fresh opportunities:\n\n"
-            "🔗 SA Youth: https://www.sayouth.mobi\n"
-            "🔗 Careers Portal: https://www.careersportal.co.za/learnerships\n"
-            "🔗 Indeed SA: https://za.indeed.com/jobs?q=learnership\n"
-            "🔗 DPSA Vacancies: https://www.dpsa.gov.za\n"
-            "🔗 PNet: https://www.pnet.co.za\n\n"
-            "--------------------------------------\n"
-            "💡 Share — help a young person find work!\n"
-            "#Learnership #Grade12Jobs #YouthEmployment #SouthAfrica"
-        )
-        post_to_facebook(message)
+    if not listings:
+        print("⚠️ No listings found this run.")
         return
 
-    post = build_post(unique)
-    print("\n📝 Post preview (first 500 chars):\n")
-    print(post[:500])
-    print("\n📤 Posting to Facebook...")
+    # Post only 1 listing per run (GitHub Actions runs every 30 min)
+    job = listings[0]
+    index = int(datetime.now().strftime("%H")) + int(datetime.now().strftime("%M"))
+    post = build_single_post(job, index)
+    print(f"📤 Posting: {job['title'][:60]}...")
     post_to_facebook(post)
 
 if __name__ == "__main__":
