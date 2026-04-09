@@ -40,26 +40,30 @@ GOOD_KEYWORDS = [
     "grade 12", "matric", "no experience", "no degree", "nqf",
     "trainee", "apprentice", "youth", "school leaver", "junior",
     "clerk", "assistant", "general worker", "vacancies", "2026",
+    "apply now", "applications open", "hiring", "opportunity",
 ]
 
 BAD_KEYWORDS = [
     "honours required", "masters", "phd", "postgraduate",
     "5 years experience", "executive", "head of", "director",
+    "scam", "fake", "fraud", "warning", "alert", "not offering",
+    "beware", "caution", "hoax", "misleading", "false", "debunk",
+    "myth", "misinformation", "not true", "clarification",
 ]
 
 SA_LOCATIONS = [
     "Gauteng", "Johannesburg", "Pretoria", "Cape Town", "Durban",
     "Port Elizabeth", "Gqeberha", "Bloemfontein", "Polokwane",
-    "Nelspruit", "Mbombela", "East London", "Kimberley",
-    "South Africa (Nationwide)", "Various Locations, South Africa",
+    "Nelspruit", "East London", "South Africa (Nationwide)",
 ]
 
 def is_relevant(title, summary=""):
     text = (title + " " + summary).lower()
-    return any(kw in text for kw in GOOD_KEYWORDS) and not any(kw in text for kw in BAD_KEYWORDS)
+    has_good = any(kw in text for kw in GOOD_KEYWORDS)
+    has_bad  = any(kw in text for kw in BAD_KEYWORDS)
+    return has_good and not has_bad
 
 def shorten_url(long_url):
-    """Use TinyURL free API to shorten the link"""
     try:
         r = requests.get(
             f"https://tinyurl.com/api-create.php?url={long_url}",
@@ -69,7 +73,7 @@ def shorten_url(long_url):
             return r.text.strip()
     except Exception:
         pass
-    return long_url  # fallback to original if shortening fails
+    return long_url
 
 def fetch_all_listings():
     all_listings = []
@@ -101,12 +105,11 @@ def fetch_all_listings():
     return unique
 
 def get_closing_date():
-    """Generate a realistic closing date 2-4 weeks from now"""
     days_ahead = random.randint(14, 30)
     closing = datetime.now() + timedelta(days=days_ahead)
     return closing.strftime("%d %B %Y")
 
-def build_single_post(job):
+def build_single_post(job, short_link):
     location = random.choice(SA_LOCATIONS)
     closing  = get_closing_date()
 
@@ -121,7 +124,8 @@ def build_single_post(job):
         f"📍 {location}\n"
         f"📅 Closing Date: {closing}\n"
         f"\n"
-        f"🔗 Application link in the comment section\n"
+        f"Apply here:\n"
+        f"{short_link}\n"
         f"\n"
         f"💡 Share this — help a young person!\n"
         f"👉 Follow Kuvukiland for daily opportunities\n"
@@ -150,24 +154,6 @@ def post_to_facebook(message):
         print(f"  ❌ Error: {e}")
         return None
 
-def post_comment(post_id, link):
-    """Post the application link as a comment on the post"""
-    short_link = shorten_url(link)
-    comment_url = f"https://graph.facebook.com/v25.0/{post_id}/comments"
-    payload = {
-        "message": f"🔗 Apply here: {short_link}",
-        "access_token": PAGE_TOKEN
-    }
-    try:
-        r = requests.post(comment_url, data=payload, timeout=20)
-        result = r.json()
-        if "id" in result:
-            print(f"  ✅ Comment posted with link!")
-        else:
-            print(f"  ❌ Comment failed: {result}")
-    except Exception as e:
-        print(f"  ❌ Comment error: {e}")
-
 def main():
     print(f"\n🤖 Kuvukiland Job Bot — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("Fetching listings...\n")
@@ -180,19 +166,18 @@ def main():
         return
 
     job = listings[0]
-    post = build_single_post(job)
-
     print(f"📤 Posting: {job['title'][:60]}...")
+    print("🔗 Shortening link...")
+    short_link = shorten_url(job["link"])
+    print(f"   Short link: {short_link}")
+
+    post = build_single_post(job, short_link)
+
     print("\n--- POST PREVIEW ---")
     print(post)
     print("--------------------\n")
 
-    post_id = post_to_facebook(post)
-
-    if post_id:
-        time.sleep(3)
-        print("💬 Posting application link as comment...")
-        post_comment(post_id, job["link"])
+    post_to_facebook(post)
 
 if __name__ == "__main__":
     main()
