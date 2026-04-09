@@ -2,14 +2,13 @@ name: Kuvukiland Daily Job Bot
 
 on:
   schedule:
-    # Runs every day at 7:00 AM South Africa time (UTC+2 = 05:00 UTC)
-    - cron: '0 5 * * *'
-  workflow_dispatch:  # allows manual run from GitHub UI anytime
+    # Every 30 minutes, 24 hours a day = up to 48 runs per day
+    - cron: '0,30 * * * *'
+  workflow_dispatch:
 
 jobs:
   post-jobs:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -20,12 +19,10 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          pip install requests beautifulsoup4 lxml
+        run: pip install requests beautifulsoup4 lxml
 
       - name: Run Job Bot
         env:
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
-        run: |
-          python post_jobs.py
+        run: python post_jobs.py
