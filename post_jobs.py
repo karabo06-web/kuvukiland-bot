@@ -79,7 +79,9 @@ BAD_KEYWORDS = [
     "report", "survey", "study", "research", "analysis",
     "top learnership", "best learnership", "list of", "here are",
     "how to apply", "everything you need", "guide to", "what is",
-    "programs in south africa for 2025", "for 2025", "in 2025","2025",
+    "programs in south africa for 2025", "for 2025", "in 2025","2025","transformative", "impact", "celebrating", "role of",
+    "unemployment", "unemployed", "economy", "skills development",
+    "graduation", "graduates celebrated", "completed",
 ]
 
 RSS_FEEDS = [
@@ -106,9 +108,26 @@ def make_key(title):
 
 def is_relevant(title, summary=""):
     text = (title + " " + summary).lower()
-    has_good = any(kw in text for kw in GOOD_KEYWORDS)
-    has_bad  = any(kw in text for kw in BAD_KEYWORDS)
-    return has_good and not has_bad
+    
+    # Must have a job-type keyword
+    job_types = [
+        "learnership", "internship", "apprentice", "trainee",
+        "vacancy", "vacancies", "entry level", "entry-level",
+    ]
+    has_job_type = any(kw in text for kw in job_types)
+    
+    # Must also have an action or opportunity word
+    action_words = [
+        "apply", "application", "opportunity", "opportunities",
+        "hiring", "opening", "available", "wanted", "required",
+        "2026", "now open", "invited",
+    ]
+    has_action = any(kw in text for kw in action_words)
+    
+    # Must not have bad keywords
+    has_bad = any(kw in text for kw in BAD_KEYWORDS)
+    
+    return has_job_type and has_action and not has_bad
 
 def build_apply_link(title):
     """Build a Google search URL for the job — always works, takes user to real results."""
