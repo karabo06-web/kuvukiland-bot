@@ -77,6 +77,9 @@ BAD_KEYWORDS = [
     "protest", "strike", "looting", "riot", "crime", "convicted",
     "tender", "budget", "policy", "parliament", "minister says",
     "report", "survey", "study", "research", "analysis",
+    "top learnership", "best learnership", "list of", "here are",
+    "how to apply", "everything you need", "guide to", "what is",
+    "programs in south africa for 2025", "for 2025", "in 2025","2025",
 ]
 
 RSS_FEEDS = [
