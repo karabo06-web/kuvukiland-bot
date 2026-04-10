@@ -1,5 +1,5 @@
 """
-Kuvukiland Job Bot - Google News RSS + Real Link Resolver
+Kuvukiland Job Bot - Google News RSS + Fixed Link Resolver
 """
 
 import os
@@ -36,7 +36,7 @@ GOOD_KEYWORDS = [
     "grade 12", "matric", "no experience", "no degree", "nqf",
     "trainee", "apprentice", "youth", "school leaver", "junior",
     "clerk", "assistant", "general worker", "vacancies", "2026",
-    "apply", "opportunity", "graduate", "bursary",
+    "apply", "opportunity", "graduate",
 ]
 
 BAD_KEYWORDS = [
@@ -44,6 +44,7 @@ BAD_KEYWORDS = [
     "5 years experience", "10 years", "executive", "head of",
     "director", "scam", "fake", "fraud", "warning", "not offering",
     "beware", "hoax", "misleading", "debunk", "not true",
+    "bursary",
 ]
 
 RSS_FEEDS = [
@@ -75,16 +76,30 @@ def is_relevant(title, summary=""):
     return has_good and not has_bad
 
 def resolve_url(google_url):
+    """Extract real URL from Google News RSS link."""
     try:
-        r = requests.get(google_url, headers=HEADERS, timeout=15, allow_redirects=True)
+        # Method 1: Follow redirects with a browser-like session
+        session = requests.Session()
+        session.headers.update(HEADERS)
+        r = session.get(google_url, timeout=15, allow_redirects=True)
         final_url = r.url
-        if "google.com" in final_url:
-            match = re.search(r'url=([^&]+)', google_url)
-            if match:
-                return unquote(match.group(1))
-        return final_url
-    except Exception:
-        return google_url
+        if "google.com" not in final_url:
+            return final_url
+
+        # Method 2: Extract from page content
+        match = re.search(r'<a href="(https?://(?!news\.google)[^"]+)"', r.text)
+        if match:
+            return match.group(1)
+
+        # Method 3: Extract from the RSS URL itself
+        match = re.search(r'url=(https?[^&]+)', google_url)
+        if match:
+            return unquote(match.group(1))
+
+    except Exception as e:
+        print(f"    Link resolve error: {e}")
+
+    return google_url
 
 def fetch_all_listings():
     all_listings = []
@@ -132,7 +147,6 @@ def build_post(job, real_link):
         f"🔌 Nasi iSpan 🚨\n\n"
         f"{job['title']}\n\n"
         f"✔ Grade 12 / Matric\n"
-        f"✔ No degree needed\n"
         f"✔ No experience required\n"
         f"📍 {location}\n"
         f"📅 Closing Date: {closing}\n"
