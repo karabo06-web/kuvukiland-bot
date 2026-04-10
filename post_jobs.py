@@ -1,5 +1,5 @@
 """
-Kuvukiland Job Bot - Google News RSS + Source URL Fallback
+Kuvukiland Job Bot - Google News RSS + Google Search Links
 """
 
 import os
@@ -9,7 +9,7 @@ import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from html import unescape
-from urllib.parse import unquote
+from urllib.parse import quote_plus
 import random
 
 PAGE_ID     = os.environ.get("FB_PAGE_ID", "")
@@ -25,9 +25,39 @@ HEADERS = {
 }
 
 SA_LOCATIONS = [
-    "Gauteng", "Johannesburg", "Pretoria", "Cape Town", "Durban",
-    "Port Elizabeth", "Gqeberha", "Bloemfontein", "Polokwane",
-    "Nelspruit", "East London", "South Africa (Nationwide)",
+    # Gauteng - Major cities
+    "Johannesburg", "Pretoria", "Ekurhuleni", "Soweto", "Sandton",
+    "Randburg", "Roodepoort", "Germiston", "Boksburg", "Benoni",
+    "Kempton Park", "Alberton", "Centurion", "Midrand", "Fourways",
+    "Tembisa", "Mamelodi", "Soshanguve", "Atteridgeville", "Mabopane",
+    "Thembisa", "Kagiso", "Krugersdorp", "Randfontein", "Westonaria",
+    "Springs", "Brakpan", "Nigel", "Heidelberg", "Vereeniging",
+    "Vanderbijlpark", "Sebokeng", "Evaton", "Meyerton", "Bronkhorstspruit",
+    "Cullinan", "Hammanskraal", "Garankuwa", "Winterveld", "Temba",
+    "Diepsloot", "Orange Farm", "Lenasia", "Eldorado Park", "Ennerdale",
+    "Alexandra", "Tsakane", "Katlehong", "Thokoza", "Vosloorus",
+    "Daveyton", "Wattville", "Duduza", "Tokoza", "Westdene",
+    # KZN - Major cities
+    "Durban", "Pietermaritzburg", "Richards Bay", "Newcastle",
+    "Empangeni", "Ladysmith", "Port Shepstone", "Tongaat",
+    "Pinetown", "Amanzimtoti", "Umhlanga", "Ballito", "Stanger",
+    # KZN - Small towns
+    "Eshowe", "Mtubatuba", "Hluhluwe", "Jozini", "Mkuze",
+    "Pongola", "Vryheid", "Dundee", "Glencoe", "Greytown",
+    "Howick", "Mooi River", "Estcourt", "Bergville", "Winterton",
+    "Drakensberg", "Underberg", "Ixopo", "Umzimkulu", "Kokstad",
+    "Margate", "Scottburgh", "Umkomaas", "Umdloti", "Tongaat",
+    "Stanger", "Mandeni", "Darnall", "Gingindlovu", "Eshowe",
+    "Nkandla", "Melmoth", "Ulundi", "Nongoma", "Ingwavuma",
+    "Ubombo", "Phongolo", "Paulpietersburg", "Louwsburg", "Nqutu",
+    "Msinga", "Tugela Ferry", "Kranskop", "Maphumulo", "Ndwedwe",
+    "Inanda", "KwaMashu", "Umlazi", "Isipingo", "Chatsworth",
+    "Phoenix", "Verulam", "Waterloo", "Redhill", "Newlands West",
+    "Reservoir Hills", "Sydenham", "Overport", "Berea", "Musgrave",
+    # Other provinces
+    "Cape Town", "Port Elizabeth", "Gqeberha", "Bloemfontein",
+    "Polokwane", "Nelspruit", "East London", "Kimberley",
+    "South Africa (Nationwide)",
 ]
 
 GOOD_KEYWORDS = [
@@ -77,22 +107,10 @@ def is_relevant(title, summary=""):
     has_bad  = any(kw in text for kw in BAD_KEYWORDS)
     return has_good and not has_bad
 
-def resolve_url(google_url):
-    """Try to get real URL from Google News link."""
-    try:
-        session = requests.Session()
-        r = session.get(google_url, headers=HEADERS, timeout=20, allow_redirects=True)
-        if "google.com" not in r.url:
-            return r.url
-        match = re.search(r'<c-wiz[^>]*data-url="([^"]+)"', r.text)
-        if match:
-            return unquote(match.group(1))
-        match = re.search(r'"(https?://(?!.*google\.com)[^"]{20,})"', r.text)
-        if match:
-            return match.group(1)
-    except Exception as e:
-        print(f"    Resolve error: {e}")
-    return None
+def build_apply_link(title):
+    """Build a Google search URL for the job — always works, takes user to real results."""
+    query = quote_plus(title + " apply south africa 2026")
+    return f"https://www.google.com/search?q={query}"
 
 def fetch_all_listings():
     all_listings = []
@@ -119,7 +137,6 @@ def fetch_all_listings():
                     source_match = re.search(r'\s*-\s*([^-]+)$', title)
                     source = source_match.group(1).strip() if source_match else "Online"
 
-                source_url = source_el.get("url", "") if source_el is not None else ""
                 title = re.sub(r'\s*-\s*[^-]+$', '', title).strip()
 
                 if title and link and is_relevant(title, summary):
@@ -127,7 +144,6 @@ def fetch_all_listings():
                         "title": title[:120],
                         "link": link,
                         "source": source,
-                        "source_url": source_url,
                     })
             time.sleep(1)
         except Exception as e:
@@ -208,19 +224,13 @@ def main():
         open(POSTED_FILE, "w").close()
         job = listings[0]
 
+    apply_link = build_apply_link(job["title"])
     print(f"📤 Selected: {job['title'][:60]}")
-    print(f"🔗 Resolving real link...")
-    real_link = resolve_url(job["link"])
-
-    if real_link and "google.com" not in real_link:
-        apply_link = real_link
-        print(f"   ✅ Real link: {apply_link}")
-    else:
-        apply_link = job.get("source_url") or job["link"]
-        print(f"   ⚠️ Using source URL: {apply_link}")
+    print(f"🔗 Apply link: {apply_link}")
+    print(f"🌐 Source: {job.get('source', 'Unknown')}\n")
 
     post = build_post(job, apply_link)
-    print("\n--- POST PREVIEW ---")
+    print("--- POST PREVIEW ---")
     print(post)
     print("--------------------\n")
 
