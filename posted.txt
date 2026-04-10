@@ -1,3 +1,11 @@
-konica minolta south africa celebrates learnership graduatio
-mtn south africa launches 12-month ict learnership for youth
-energy firm sasol not ‘looking for 50,000 youths to train, e
+# Privacy Policy — Kuvukiland
+
+This app uses the Facebook Graph API to post job listings to the Kuvukiland Facebook Page.
+
+- We do not collect any personal data from users.
+- We do not store any login information.
+- No third parties receive any data through this app.
+- The app only posts content — it does not read user data.
+
+Contact: karajjobe@gmail.com
+Last updated: April 2026
