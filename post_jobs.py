@@ -1,6 +1,8 @@
 """
-Kuvukiland Job Bot - RSS Edition
-Posts entry-level jobs & learnerships to Kuvukiland Facebook Page
+Kuvukiland Job Bot - Fixed Edition
+- No duplicate posts (tracks posted job titles in posted.txt)
+- Posts are public (correct Graph API parameters)
+- Picks a different job each run
 """
 
 import os
@@ -13,9 +15,10 @@ from html import unescape
 import random
 
 # ── Config ────────────────────────────────────────────────────────────────────
-PAGE_ID    = os.environ.get("FB_PAGE_ID", "1158789827307547")
+PAGE_ID    = os.environ.get("FB_PAGE_ID", "")
 PAGE_TOKEN = os.environ.get("FB_PAGE_TOKEN", "")
-GRAPH_URL  = f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
+GRAPH_URL  = f"https://graph.facebook.com/v19.0/{PAGE_ID}/feed"
+POSTED_FILE = "posted.txt"
 
 HEADERS = {
     "User-Agent": (
@@ -57,12 +60,30 @@ SA_LOCATIONS = [
     "Nelspruit", "East London", "South Africa (Nationwide)",
 ]
 
+# ── Duplicate Tracking ────────────────────────────────────────────────────────
+def load_posted():
+    """Load set of already-posted job title keys."""
+    if not os.path.exists(POSTED_FILE):
+        return set()
+    with open(POSTED_FILE, "r", encoding="utf-8") as f:
+        return set(line.strip() for line in f if line.strip())
+
+def save_posted(key):
+    """Append a new posted job key to the file."""
+    with open(POSTED_FILE, "a", encoding="utf-8") as f:
+        f.write(key + "\n")
+
+def make_key(title):
+    return title[:60].lower().strip()
+
+# ── Relevance Filter ──────────────────────────────────────────────────────────
 def is_relevant(title, summary=""):
     text = (title + " " + summary).lower()
     has_good = any(kw in text for kw in GOOD_KEYWORDS)
     has_bad  = any(kw in text for kw in BAD_KEYWORDS)
     return has_good and not has_bad
 
+# ── URL Shortener ─────────────────────────────────────────────────────────────
 def shorten_url(long_url):
     try:
         r = requests.get(
@@ -75,13 +96,14 @@ def shorten_url(long_url):
         pass
     return long_url
 
+# ── RSS Fetcher ───────────────────────────────────────────────────────────────
 def fetch_all_listings():
     all_listings = []
     for url in RSS_FEEDS:
         try:
             r = requests.get(url, headers=HEADERS, timeout=20)
             root = ET.fromstring(r.content)
-            for item in root.findall(".//item")[:8]:
+            for item in root.findall(".//item")[:10]:
                 title_el = item.find("title")
                 link_el  = item.find("link")
                 desc_el  = item.find("description")
@@ -96,51 +118,50 @@ def fetch_all_listings():
         except Exception as e:
             print(f"  Feed error: {e}")
 
+    # Deduplicate by title
     seen, unique = set(), []
     for j in all_listings:
-        key = j["title"][:50].lower()
+        key = make_key(j["title"])
         if key not in seen:
             seen.add(key)
             unique.append(j)
     return unique
 
+# ── Post Builder ──────────────────────────────────────────────────────────────
 def get_closing_date():
     days_ahead = random.randint(14, 30)
     closing = datetime.now() + timedelta(days=days_ahead)
     return closing.strftime("%d %B %Y")
 
-def build_single_post(job, short_link):
+def build_post(job, short_link):
     location = random.choice(SA_LOCATIONS)
     closing  = get_closing_date()
-
-    post = (
-        f"🔌 Nasi iSpan 🚨\n"
-        f"\n"
-        f"{job['title']}\n"
-        f"\n"
+    return (
+        f"🔌 Nasi iSpan 🚨\n\n"
+        f"{job['title']}\n\n"
         f"✔ Grade 12 / Matric\n"
         f"✔ No degree needed\n"
         f"✔ No experience required\n"
         f"📍 {location}\n"
-        f"📅 Closing Date: {closing}\n"
-        f"\n"
-        f"Apply here:\n"
-        f"{short_link}\n"
-        f"\n"
+        f"📅 Closing Date: {closing}\n\n"
+        f"Apply here:\n{short_link}\n\n"
         f"💡 Share this — help a young person!\n"
-        f"👉 Follow Kuvukiland for daily opportunities\n"
-        f"\n"
+        f"👉 Follow Kuvukiland for daily opportunities\n\n"
         f"#Learnership #EntryLevel #Grade12Jobs #YouthEmployment "
         f"#SouthAfrica #Matric #NoExperience #KuvukilandJobs "
         f"#Internship #GovernmentJobs #SETA"
     )
-    return post
 
+# ── Facebook Poster ───────────────────────────────────────────────────────────
 def post_to_facebook(message):
     if not PAGE_TOKEN:
         print("❌ FB_PAGE_TOKEN not set.")
         return None
-    payload = {"message": message, "access_token": PAGE_TOKEN}
+    payload = {
+        "message": message,
+        "access_token": PAGE_TOKEN,
+        "published": "true",          # ← FIX: ensures post is public
+    }
     try:
         r = requests.post(GRAPH_URL, data=payload, timeout=20)
         result = r.json()
@@ -154,30 +175,42 @@ def post_to_facebook(message):
         print(f"  ❌ Error: {e}")
         return None
 
+# ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     print(f"\n🤖 Kuvukiland Job Bot — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print("Fetching listings...\n")
+
+    already_posted = load_posted()
+    print(f"📋 Already posted: {len(already_posted)} jobs\n")
 
     listings = fetch_all_listings()
     print(f"Found {len(listings)} relevant listings\n")
 
-    if not listings:
-        print("⚠️ No listings found this run.")
+    # ── FIX: Pick first job NOT already posted ────────────────────────────────
+    job = None
+    for listing in listings:
+        key = make_key(listing["title"])
+        if key not in already_posted:
+            job = listing
+            break
+
+    if not job:
+        print("⚠️ All fetched jobs already posted. Skipping this run.")
         return
 
-    job = listings[0]
     print(f"📤 Posting: {job['title'][:60]}...")
-    print("🔗 Shortening link...")
     short_link = shorten_url(job["link"])
     print(f"   Short link: {short_link}")
 
-    post = build_single_post(job, short_link)
-
+    post = build_post(job, short_link)
     print("\n--- POST PREVIEW ---")
     print(post)
     print("--------------------\n")
 
-    post_to_facebook(post)
+    result = post_to_facebook(post)
+
+    # ── Only mark as posted if it succeeded ───────────────────────────────────
+    if result:
+        save_posted(make_key(job["title"]))
 
 if __name__ == "__main__":
     main()
