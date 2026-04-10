@@ -79,25 +79,36 @@ def is_relevant(title, summary=""):
     return has_good and not has_bad
 
 def resolve_url(google_url):
-    """Extract real URL from Google News RSS link."""
+    """Extract real URL by decoding the Google News article ID."""
     try:
-        # Method 1: Follow redirects with a browser-like session
+        # Extract the article ID from the Google URL
+        match = re.search(r'/articles/([A-Za-z0-9_-]+)', google_url)
+        if not match:
+            return google_url
+
+        article_id = match.group(1)
+
+        # Decode base64 article ID to get real URL
+        import base64
+        # Pad base64 string
+        padded = article_id + '=' * (4 - len(article_id) % 4)
+        try:
+            decoded = base64.urlsafe_b64decode(padded).decode('latin-1')
+            # Extract URL from decoded bytes
+            url_match = re.search(r'(https?://[^\s\x00-\x1f\x7f-\x9f"<>]+)', decoded)
+            if url_match:
+                real_url = url_match.group(1).strip()
+                if "google.com" not in real_url:
+                    return real_url
+        except Exception:
+            pass
+
+        # Fallback: try following the redirect
         session = requests.Session()
         session.headers.update(HEADERS)
         r = session.get(google_url, timeout=15, allow_redirects=True)
-        final_url = r.url
-        if "google.com" not in final_url:
-            return final_url
-
-        # Method 2: Extract from page content
-        match = re.search(r'<a href="(https?://(?!news\.google)[^"]+)"', r.text)
-        if match:
-            return match.group(1)
-
-        # Method 3: Extract from the RSS URL itself
-        match = re.search(r'url=(https?[^&]+)', google_url)
-        if match:
-            return unquote(match.group(1))
+        if "google.com" not in r.url:
+            return r.url
 
     except Exception as e:
         print(f"    Link resolve error: {e}")
