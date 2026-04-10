@@ -33,10 +33,9 @@ SA_LOCATIONS = [
 
 GOOD_KEYWORDS = [
     "learnership", "internship", "entry level", "entry-level",
-    "grade 12", "matric", "no experience", "no degree", "nqf",
-    "trainee", "apprentice", "youth", "school leaver", "junior",
-    "clerk", "assistant", "general worker", "vacancies", "2026",
-    "apply", "opportunity", "graduate",
+    "nqf", "trainee", "apprentice", "school leaver",
+    "apply now", "applications open", "applications invited",
+    "vacancy", "vacancies", "job opportunity",
 ]
 
 BAD_KEYWORDS = [
@@ -44,7 +43,11 @@ BAD_KEYWORDS = [
     "5 years experience", "10 years", "executive", "head of",
     "director", "scam", "fake", "fraud", "warning", "not offering",
     "beware", "hoax", "misleading", "debunk", "not true",
-    "bursary",
+    "bursary", "suspended", "arrested", "leaked", "leak",
+    "court", "sentence", "murder", "killed", "died", "death",
+    "protest", "strike", "looting", "riot", "crime", "convicted",
+    "tender", "budget", "policy", "parliament", "minister says",
+    "report", "survey", "study", "research", "analysis",
 ]
 
 RSS_FEEDS = [
