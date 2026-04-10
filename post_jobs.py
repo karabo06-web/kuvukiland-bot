@@ -1,5 +1,5 @@
 """
-Kuvukiland Job Bot - Google News RSS + Fixed Link Resolver
+Kuvukiland Job Bot - Google News RSS + Source URL Fallback
 """
 
 import os
@@ -18,11 +18,10 @@ GRAPH_URL   = f"https://graph.facebook.com/v19.0/{PAGE_ID}/feed"
 POSTED_FILE = "posted.txt"
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-ZA,en;q=0.9",
+    "Referer": "https://news.google.com/",
 }
 
 SA_LOCATIONS = [
@@ -79,41 +78,21 @@ def is_relevant(title, summary=""):
     return has_good and not has_bad
 
 def resolve_url(google_url):
-    """Extract real URL by decoding the Google News article ID."""
+    """Try to get real URL from Google News link."""
     try:
-        # Extract the article ID from the Google URL
-        match = re.search(r'/articles/([A-Za-z0-9_-]+)', google_url)
-        if not match:
-            return google_url
-
-        article_id = match.group(1)
-
-        # Decode base64 article ID to get real URL
-        import base64
-        # Pad base64 string
-        padded = article_id + '=' * (4 - len(article_id) % 4)
-        try:
-            decoded = base64.urlsafe_b64decode(padded).decode('latin-1')
-            # Extract URL from decoded bytes
-            url_match = re.search(r'(https?://[^\s\x00-\x1f\x7f-\x9f"<>]+)', decoded)
-            if url_match:
-                real_url = url_match.group(1).strip()
-                if "google.com" not in real_url:
-                    return real_url
-        except Exception:
-            pass
-
-        # Fallback: try following the redirect
         session = requests.Session()
-        session.headers.update(HEADERS)
-        r = session.get(google_url, timeout=15, allow_redirects=True)
+        r = session.get(google_url, headers=HEADERS, timeout=20, allow_redirects=True)
         if "google.com" not in r.url:
             return r.url
-
+        match = re.search(r'<c-wiz[^>]*data-url="([^"]+)"', r.text)
+        if match:
+            return unquote(match.group(1))
+        match = re.search(r'"(https?://(?!.*google\.com)[^"]{20,})"', r.text)
+        if match:
+            return match.group(1)
     except Exception as e:
-        print(f"    Link resolve error: {e}")
-
-    return google_url
+        print(f"    Resolve error: {e}")
+    return None
 
 def fetch_all_listings():
     all_listings = []
@@ -124,18 +103,32 @@ def fetch_all_listings():
             items = root.findall(".//item")
             print(f"  Feed returned {len(items)} items")
             for item in items[:10]:
-                title_el = item.find("title")
-                link_el  = item.find("link")
-                desc_el  = item.find("description")
+                title_el  = item.find("title")
+                link_el   = item.find("link")
+                desc_el   = item.find("description")
+                source_el = item.find("source")
+
                 title   = unescape(title_el.text.strip()) if title_el is not None and title_el.text else ""
                 link    = link_el.text.strip() if link_el is not None and link_el.text else ""
                 summary = unescape(desc_el.text.strip()) if desc_el is not None and desc_el.text else ""
                 summary = re.sub(r"<[^>]+>", "", summary)
-                source_match = re.search(r'\s*-\s*([^-]+)$', title)
-                source = source_match.group(1).strip() if source_match else "Online"
-                title  = re.sub(r'\s*-\s*[^-]+$', '', title).strip()
+
+                if source_el is not None and source_el.text:
+                    source = source_el.text.strip()
+                else:
+                    source_match = re.search(r'\s*-\s*([^-]+)$', title)
+                    source = source_match.group(1).strip() if source_match else "Online"
+
+                source_url = source_el.get("url", "") if source_el is not None else ""
+                title = re.sub(r'\s*-\s*[^-]+$', '', title).strip()
+
                 if title and link and is_relevant(title, summary):
-                    all_listings.append({"title": title[:120], "link": link, "source": source})
+                    all_listings.append({
+                        "title": title[:120],
+                        "link": link,
+                        "source": source,
+                        "source_url": source_url,
+                    })
             time.sleep(1)
         except Exception as e:
             print(f"  Feed error: {e}")
@@ -153,7 +146,7 @@ def get_closing_date():
     days_ahead = random.randint(14, 30)
     return (datetime.now() + timedelta(days=days_ahead)).strftime("%d %B %Y")
 
-def build_post(job, real_link):
+def build_post(job, apply_link):
     location = random.choice(SA_LOCATIONS)
     closing  = get_closing_date()
     source   = job.get("source", "Online")
@@ -166,7 +159,7 @@ def build_post(job, real_link):
         f"📅 Closing Date: {closing}\n"
         f"🌐 Source: {source}\n\n"
         f"👇 Apply directly here:\n"
-        f"{real_link}\n\n"
+        f"{apply_link}\n\n"
         f"💡 Share this — help a young person!\n"
         f"👉 Follow Kuvukiland for daily opportunities\n\n"
         f"#Learnership #EntryLevel #Grade12Jobs #YouthEmployment "
@@ -218,9 +211,15 @@ def main():
     print(f"📤 Selected: {job['title'][:60]}")
     print(f"🔗 Resolving real link...")
     real_link = resolve_url(job["link"])
-    print(f"   Real link: {real_link}")
 
-    post = build_post(job, real_link)
+    if real_link and "google.com" not in real_link:
+        apply_link = real_link
+        print(f"   ✅ Real link: {apply_link}")
+    else:
+        apply_link = job.get("source_url") or job["link"]
+        print(f"   ⚠️ Using source URL: {apply_link}")
+
+    post = build_post(job, apply_link)
     print("\n--- POST PREVIEW ---")
     print(post)
     print("--------------------\n")
