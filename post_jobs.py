@@ -1,14 +1,14 @@
 """
-Kuvukiland Job Bot - Direct Job Sites Edition
-Scrapes real job listings from SA Youth, Indeed ZA, Careers24, PNet, JobVine
-Posts to Kuvukiland Facebook Page with actual application links
+Kuvukiland Job Bot - Working RSS Edition
+Uses RSS feeds from sites that actually support them:
+- JobVine, Gumtree, SA Government, WhatJobs, Jobplacements
 """
 
 import os
 import re
 import time
 import requests
-import json
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from html import unescape
 import random
@@ -25,8 +25,7 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-ZA,en;q=0.9",
+    "Accept": "application/rss+xml, application/xml, text/xml, */*",
 }
 
 SA_LOCATIONS = [
@@ -40,14 +39,78 @@ GOOD_KEYWORDS = [
     "grade 12", "matric", "no experience", "no degree", "nqf",
     "trainee", "apprentice", "youth", "school leaver", "junior",
     "clerk", "assistant", "general worker", "vacancies", "2026",
-    "apply now", "applications open", "hiring", "opportunity",
+    "apply", "opportunity", "graduate", "bursary",
 ]
 
 BAD_KEYWORDS = [
     "honours", "masters", "phd", "postgraduate",
     "5 years experience", "10 years", "executive", "head of",
     "director", "scam", "fake", "fraud", "warning", "not offering",
-    "beware", "hoax", "misleading", "debunk", "not true",
+    "beware", "hoax", "misleading", "debunk",
+]
+
+# ── RSS Feeds that actually work ──────────────────────────────────────────────
+RSS_FEEDS = [
+    # Gumtree SA - Jobs section RSS
+    {
+        "url": "https://www.gumtree.co.za/s-jobs/v1c8p1?q=learnership&search_category=jobs",
+        "rss": "https://www.gumtree.co.za/s-jobs/v1c8p1/rss.xml?q=learnership",
+        "source": "Gumtree SA"
+    },
+    # WhatJobs SA RSS
+    {
+        "url": "https://www.whatjobs.com/jobs/south-africa",
+        "rss": "https://www.whatjobs.com/rss/jobs/south-africa/learnership",
+        "source": "WhatJobs"
+    },
+    # Jobplacements RSS
+    {
+        "url": "https://www.jobplacements.com",
+        "rss": "https://www.jobplacements.com/rss/jobs.aspx?Keywords=learnership",
+        "source": "JobPlacements"
+    },
+    # SA Government Jobs RSS
+    {
+        "url": "https://www.governmentjobs.co.za",
+        "rss": "https://www.governmentjobs.co.za/rss/jobs",
+        "source": "Gov Jobs SA"
+    },
+    # JobVine RSS
+    {
+        "url": "https://jobvine.co.za",
+        "rss": "https://jobvine.co.za/rss/jobs.xml?search=learnership",
+        "source": "JobVine"
+    },
+    # CareerJunction RSS
+    {
+        "url": "https://www.careerjunction.co.za",
+        "rss": "https://www.careerjunction.co.za/jobs/rss?Keywords=learnership+matric",
+        "source": "CareerJunction"
+    },
+    # Adzuna SA RSS
+    {
+        "url": "https://www.adzuna.co.za",
+        "rss": "https://www.adzuna.co.za/search?q=learnership&loc=1&co=za&format=rss",
+        "source": "Adzuna SA"
+    },
+    # Indeed ZA RSS
+    {
+        "url": "https://za.indeed.com",
+        "rss": "https://za.indeed.com/rss?q=learnership+matric&l=South+Africa",
+        "source": "Indeed ZA"
+    },
+    # Jora ZA RSS
+    {
+        "url": "https://za.jora.com",
+        "rss": "https://za.jora.com/jobs?q=learnership&l=South+Africa&format=rss",
+        "source": "Jora ZA"
+    },
+    # Reed co uk ZA RSS (covers SA)
+    {
+        "url": "https://www.reed.co.uk",
+        "rss": "https://www.reed.co.uk/jobs/learnership-jobs-in-south-africa?format=rss",
+        "source": "Reed"
+    },
 ]
 
 # ── Duplicate Tracking ────────────────────────────────────────────────────────
@@ -71,184 +134,53 @@ def is_relevant(title, summary=""):
     has_bad  = any(kw in text for kw in BAD_KEYWORDS)
     return has_good and not has_bad
 
-# ── Scrapers ──────────────────────────────────────────────────────────────────
-
-def fetch_sayouth():
-    """SA Youth - sayouth.mobi (official government youth jobs site)"""
-    listings = []
-    searches = [
-        "https://sayouth.mobi/Search?q=learnership",
-        "https://sayouth.mobi/Search?q=internship",
-        "https://sayouth.mobi/Search?q=entry+level",
-    ]
-    for url in searches:
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=20)
-            # Extract job cards using regex (no BS4)
-            titles = re.findall(r'<h[23][^>]*class="[^"]*job[^"]*"[^>]*>(.*?)</h[23]>', r.text, re.DOTALL)
-            links  = re.findall(r'href="(/Job/\d+[^"]*)"', r.text)
-            for i, link in enumerate(links[:8]):
-                title = titles[i] if i < len(titles) else ""
-                title = re.sub(r'<[^>]+>', '', title).strip()
-                full_link = f"https://sayouth.mobi{link}"
-                if title and is_relevant(title):
-                    listings.append({"title": title[:120], "link": full_link, "source": "SA Youth"})
-            time.sleep(2)
-        except Exception as e:
-            print(f"  SA Youth error: {e}")
-    return listings
-
-def fetch_careers24():
-    """Careers24 - learnership/entry level jobs"""
-    listings = []
-    searches = [
-        "https://www.careers24.com/jobs/learnership/",
-        "https://www.careers24.com/jobs/internship/",
-        "https://www.careers24.com/jobs/entry-level/",
-    ]
-    for url in searches:
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=20)
-            # Extract job titles and links
-            matches = re.findall(
-                r'href="(https://www\.careers24\.com/jobs/[^"]+)"[^>]*>[^<]*<[^>]*>([^<]{10,100})</[^>]*>',
-                r.text
-            )
-            for link, title in matches[:8]:
-                title = title.strip()
-                if title and is_relevant(title):
-                    listings.append({"title": title[:120], "link": link, "source": "Careers24"})
-            time.sleep(2)
-        except Exception as e:
-            print(f"  Careers24 error: {e}")
-    return listings
-
-def fetch_pnet():
-    """PNet - South Africa's biggest job site"""
-    listings = []
-    searches = [
-        "https://www.pnet.co.za/jobs/learnership.html",
-        "https://www.pnet.co.za/jobs/internship.html",
-        "https://www.pnet.co.za/jobs/entry-level.html",
-        "https://www.pnet.co.za/jobs/matric.html",
-    ]
-    for url in searches:
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=20)
-            matches = re.findall(
-                r'href="(https://www\.pnet\.co\.za/jobs/[^"]+\.html)"[^>]*title="([^"]{10,120})"',
-                r.text
-            )
-            for link, title in matches[:8]:
-                title = title.strip()
-                if title and is_relevant(title):
-                    listings.append({"title": title[:120], "link": link, "source": "PNet"})
-            time.sleep(2)
-        except Exception as e:
-            print(f"  PNet error: {e}")
-    return listings
-
-def fetch_jobvine():
-    """JobVine SA"""
-    listings = []
-    searches = [
-        "https://jobvine.co.za/search/?search=learnership",
-        "https://jobvine.co.za/search/?search=internship+matric",
-        "https://jobvine.co.za/search/?search=entry+level+no+experience",
-    ]
-    for url in searches:
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=20)
-            matches = re.findall(
-                r'href="(https://jobvine\.co\.za/[^"]*job[^"]*)"[^>]*>([^<]{10,120})</a>',
-                r.text
-            )
-            for link, title in matches[:8]:
-                title = title.strip()
-                if title and is_relevant(title):
-                    listings.append({"title": title[:120], "link": link, "source": "JobVine"})
-            time.sleep(2)
-        except Exception as e:
-            print(f"  JobVine error: {e}")
-    return listings
-
-def fetch_indeed():
-    """Indeed ZA"""
-    listings = []
-    searches = [
-        "https://za.indeed.com/jobs?q=learnership&l=South+Africa",
-        "https://za.indeed.com/jobs?q=internship+matric&l=South+Africa",
-        "https://za.indeed.com/jobs?q=entry+level+no+experience&l=South+Africa",
-    ]
-    for url in searches:
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=20)
-            # Indeed uses data-jk for job keys
-            job_keys = re.findall(r'data-jk="([a-f0-9]+)"', r.text)
-            titles   = re.findall(r'class="jobTitle[^"]*"[^>]*><[^>]+>([^<]{5,100})</[^>]+>', r.text)
-            for i, jk in enumerate(job_keys[:8]):
-                title = titles[i].strip() if i < len(titles) else ""
-                link  = f"https://za.indeed.com/viewjob?jk={jk}"
-                if title and is_relevant(title):
-                    listings.append({"title": title[:120], "link": link, "source": "Indeed ZA"})
-            time.sleep(2)
-        except Exception as e:
-            print(f"  Indeed error: {e}")
-    return listings
-
-def fetch_dpsa():
-    """DPSA - Government vacancies (grade 12 posts)"""
+# ── RSS Fetcher ───────────────────────────────────────────────────────────────
+def fetch_rss(feed_url, source_name):
     listings = []
     try:
-        r = requests.get(
-            "https://www.dpsa.gov.za/dpsa2g/vacancies.asp",
-            headers=HEADERS, timeout=20
-        )
-        matches = re.findall(
-            r'href="(vacancy[^"]+\.pdf)"[^>]*>([^<]{10,120})</a>',
-            r.text, re.IGNORECASE
-        )
-        for link, title in matches[:8]:
-            title = title.strip()
-            full_link = f"https://www.dpsa.gov.za/dpsa2g/{link}"
-            listings.append({"title": title[:120], "link": full_link, "source": "DPSA Gov"})
-        time.sleep(2)
+        r = requests.get(feed_url, headers=HEADERS, timeout=20)
+        if r.status_code != 200:
+            print(f"    HTTP {r.status_code} from {source_name}")
+            return listings
+
+        root = ET.fromstring(r.content)
+        items = root.findall(".//item")
+        print(f"    {source_name}: {len(items)} items in feed")
+
+        for item in items[:10]:
+            title_el = item.find("title")
+            link_el  = item.find("link")
+            desc_el  = item.find("description")
+
+            title   = unescape(title_el.text.strip()) if title_el is not None and title_el.text else ""
+            link    = link_el.text.strip() if link_el is not None and link_el.text else ""
+            summary = unescape(desc_el.text.strip()) if desc_el is not None and desc_el.text else ""
+            summary = re.sub(r"<[^>]+>", "", summary)
+            title   = re.sub(r"\s*-\s*[^-]+$", "", title).strip()
+
+            if title and link and is_relevant(title, summary):
+                listings.append({
+                    "title": title[:120],
+                    "link": link,
+                    "source": source_name
+                })
+    except ET.ParseError as e:
+        print(f"    {source_name} XML parse error: {e}")
     except Exception as e:
-        print(f"  DPSA error: {e}")
+        print(f"    {source_name} error: {e}")
     return listings
 
-# ── Aggregate All Sources ─────────────────────────────────────────────────────
 def fetch_all_listings():
-    print("  Fetching SA Youth...")
-    all_listings = fetch_sayouth()
-    print(f"    → {len(all_listings)} found")
+    all_listings = []
 
-    print("  Fetching Careers24...")
-    c24 = fetch_careers24()
-    print(f"    → {len(c24)} found")
-    all_listings += c24
+    for feed in RSS_FEEDS:
+        print(f"  Trying {feed['source']}...")
+        results = fetch_rss(feed["rss"], feed["source"])
+        print(f"    → {len(results)} relevant jobs found")
+        all_listings += results
+        time.sleep(1)
 
-    print("  Fetching PNet...")
-    pnet = fetch_pnet()
-    print(f"    → {len(pnet)} found")
-    all_listings += pnet
-
-    print("  Fetching JobVine...")
-    jv = fetch_jobvine()
-    print(f"    → {len(jv)} found")
-    all_listings += jv
-
-    print("  Fetching Indeed ZA...")
-    ind = fetch_indeed()
-    print(f"    → {len(ind)} found")
-    all_listings += ind
-
-    print("  Fetching DPSA Gov...")
-    dpsa = fetch_dpsa()
-    print(f"    → {len(dpsa)} found")
-    all_listings += dpsa
-
-    # Deduplicate
+    # Deduplicate by title
     seen, unique = set(), []
     for j in all_listings:
         key = make_key(j["title"])
@@ -317,7 +249,7 @@ def main():
     already_posted = load_posted()
     print(f"📋 Already posted: {len(already_posted)} jobs\n")
 
-    print("Fetching listings from real job sites...\n")
+    print("Fetching listings from RSS feeds...\n")
     listings = fetch_all_listings()
     print(f"\n✅ Total unique listings found: {len(listings)}\n")
 
@@ -334,17 +266,16 @@ def main():
             break
 
     if not job:
-        print("⚠️ All fetched jobs already posted. Clearing history and restarting.")
-        # Clear posted.txt so it starts fresh
+        print("⚠️ All fetched jobs already posted. Clearing history.")
         open(POSTED_FILE, "w").close()
         job = listings[0]
 
     print(f"📤 Posting: {job['title'][:60]}...")
     print(f"🔗 Link: {job['link']}")
-    print(f"🌐 Source: {job.get('source', 'Unknown')}")
+    print(f"🌐 Source: {job.get('source', 'Unknown')}\n")
 
     post = build_post(job)
-    print("\n--- POST PREVIEW ---")
+    print("--- POST PREVIEW ---")
     print(post)
     print("--------------------\n")
 
